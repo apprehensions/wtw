@@ -3,7 +3,7 @@
 
 PKG_CONFIG = pkg-config
 
-PKGS = wlroots wayland-client wayland-cursor fcft pixman-1
+PKGS = wlroots wayland-client fcft pixman-1
 INCS = `$(PKG_CONFIG) --cflags $(PKGS)`
 LIBS = `$(PKG_CONFIG) --libs $(PKGS)`
 
