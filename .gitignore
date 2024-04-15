@@ -1,0 +1,5 @@
+wtw
+xdg-shell-protocol.c
+wlr-layer-shell-unstable-v1.c
+*.o
+*-protocol.*
