@@ -10,6 +10,7 @@ wtw is a simple text widget for wlroots; ported from [stw](https://github.com/si
 * fcft
 * pixman
 * `memfd_create`
+* make(1) \*
 * wlroots compositor supporting `zwlr-layer-shell-unstable-v1`
 
 \* _compile-time dependency_
