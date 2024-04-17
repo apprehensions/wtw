@@ -1,6 +1,8 @@
 .POSIX:
 .SUFFIXES:
 
+PREFIX = /usr/local
+
 PKG_CONFIG = pkg-config
 
 PKGS = wlroots wayland-client fcft pixman-1
@@ -36,4 +38,12 @@ wlr-layer-shell-unstable-v1-protocol.h:
 clean:
 	rm -f wtw xdg-shell-protocol.c wlr-layer-shell-unstable-v1.c *.o *-protocol.*
 
-.PHONY: clean
+install: all
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	cp -f wtw $(DESTDIR)$(PREFIX)/bin
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/wtw
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/wtw
+
+.PHONY: all clean install uninstall
