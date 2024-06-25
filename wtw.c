@@ -17,10 +17,13 @@
 #include "xdg-shell-protocol.h"
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 
+#define MAX(A, B)  ((A) > (B) ? (A) : (B))
+#define MIN(A, B)  ((A) < (B) ? (A) : (B))
+
 #define INITIAL_CAPACITY 2
 
 static const char usage[] =
-	"usage: wtw [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
+	"usage: wtw [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period] [-P padding]\n"
 	"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n";
 
 #include "config.h"
@@ -157,29 +160,42 @@ read_text(void)
 static void
 render(void)
 {
-	int ty = y;
+	int ty = y + pad;
+	uint32_t tw = 0, w = 0, h = 0;
 	char *line;
 	PoolBuf *buf;
 
 	if (width < 0 || height < 0)
 		return;
-	
-	if (!(buf = poolbuf_create(shm, width, height))) {
+
+	/* Use maximum text line width and height */
+	for (line = text; line < text + len; line += strlen(line) + 1) {
+		tw = drwl_font_getwidth(drw, line);
+		w = MIN(MAX(w, tw), width);
+		h += drw->font->height;
+	}
+
+	w += pad * 2;
+	h += pad * 2;
+
+	if (!(buf = poolbuf_create(shm, w, h))) {
 		fputs("failed to create draw buffer\n", stderr);
 		return;
 	}
 
-	drwl_prepare_drawing(drw, width, height, buf->data, buf->stride);
+	drwl_prepare_drawing(drw, w, h, buf->data, buf->stride);
+
+	drwl_rect(drw, x, y, w, h, 1, 1);
 
 	for (line = text; line < text + len; line += strlen(line) + 1) {
-		drwl_text(drw, x, ty, width, drw->font->height, 0, line, 0);
+		drwl_text(drw, x + pad, ty, w, drw->font->height, 0, line, 0);
 		ty += drw->font->height;
 	}
 
 	drwl_finish_drawing(drw);
 
 	wl_surface_attach(surface, buf->wl_buf, 0, 0);
-	wl_surface_damage_buffer(surface, 0, 0, width, height);
+	wl_surface_damage_buffer(surface, 0, 0, w, h);
 	poolbuf_destroy(buf);
 	wl_surface_commit(surface);
 }
@@ -391,7 +407,7 @@ main(int argc, char *argv[])
 	int opt;
 	int ret = EXIT_FAILURE;
 
-	while ((opt = getopt(argc, argv, "b:c:f:p:w:h:x:y:")) != -1) {
+	while ((opt = getopt(argc, argv, "b:c:f:p:P:w:h:x:y:")) != -1) {
 		switch (opt) {
 		case 'b':
 		case 'c':
@@ -399,6 +415,7 @@ main(int argc, char *argv[])
 			break;
 		case 'f': font_name = optarg; break;
 		case 'p': period = atoi(optarg); break;
+		case 'P': pad = atoi(optarg); break;
 		case 'w': width = atoi(optarg); break;
 		case 'h': height = atoi(optarg); break;
 		case 'x': x = atoi(optarg); break;

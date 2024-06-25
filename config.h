@@ -1,7 +1,8 @@
 /* See LICENSE file for copyright and license details. */
 
 /* appearance */
-static const char *font_name = "monospace:size=16:dpi=96";
+static int pad = 10;
+static const char *font_name = "monospace:size=12:dpi=96";
 static uint32_t scheme[2] = {
 	[ColFg] = 0xbbbbbbff,
 	[ColBg] = 0x000000ff,
