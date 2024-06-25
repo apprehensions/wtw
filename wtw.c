@@ -1,19 +1,17 @@
 /* See LICENSE file for copyright and license details. */
-#define _GNU_SOURCE
-#include <signal.h>
-#include <stdlib.h>
+#define _POSIX_C_SOURCE 200809L
 #include <errno.h>
-#include <sys/signalfd.h>
-#include <string.h>
-#include <err.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/wait.h>
+#include <getopt.h>
 #include <poll.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/signalfd.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <wayland-client.h>
 
-#include "arg.h"
 #include "drwl.h"
 #include "poolbuf.h"
 #include "xdg-shell-protocol.h"
@@ -21,7 +19,9 @@
 
 #define INITIAL_CAPACITY 2
 
-char *argv0;
+static const char usage[] =
+	"usage: %s [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
+	"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n";
 
 #include "config.h"
 
@@ -51,13 +51,13 @@ start_cmd(void)
 	int fds[2];
 	if (pipe(fds) == -1) {
 		perror("pipe:");
-		return 1;
+		return -1;
 	}
 
 	inputf = fdopen(fds[0], "r");
 	if (inputf == NULL) {
 		perror("pipe:");
-		return 1;
+		return -1;
 	}
 
 	cmdpid = fork();
@@ -227,15 +227,6 @@ static const struct wl_registry_listener registry_listener = {
 	.global_remove = registry_global_remove,
 };
 
-static void
-usage(void)
-{
-	fprintf(stderr,
-		"usage: %s [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
-		"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n", argv0);
-	exit(EXIT_SUCCESS);
-}
-
 static int
 setup(void)
 {
@@ -397,25 +388,27 @@ cleanup(void)
 int
 main(int argc, char *argv[])
 {
+	int opt;
 	int ret = EXIT_FAILURE;
 
-	ARGBEGIN {
-	case '?': usage();
-	case 'b': scheme[ColBg] = strtoul(EARGF(usage()), NULL, 16); break;
-	case 'c': scheme[ColFg] = strtoul(EARGF(usage()), NULL, 16); break;
-	case 'f': font_name = EARGF(usage()); break;
-	case 'p': period = atoi(EARGF(usage())); break;
-	case 'w': width = atoi(EARGF(usage())); break;
-	case 'h': height = atoi(EARGF(usage())); break;
-	case 'x': x = atoi(EARGF(usage())); break;
-	case 'y': y = atoi(EARGF(usage())); break;
-	default:
-		warn("bad option: -%c", ARGC());
-		usage();
-	} ARGEND
-
+	while ((opt = getopt(argc, argv, "b:c:f:p:w:h:x:y:")) != -1) {
+		switch (opt) {
+		case 'b':
+		case 'c':
+			scheme[opt == 'b' ? ColBg : ColFg] = strtoul(optarg, NULL, 16);
+			break;
+		case 'f': font_name = optarg; break;
+		case 'p': period = atoi(optarg); break;
+		case 'w': width = atoi(optarg); break;
+		case 'h': height = atoi(optarg); break;
+		case 'x': x = atoi(optarg); break;
+		case 'y': y = atoi(optarg); break;
+		default:
+			fprintf(stderr, usage, argv[0]);
+		}
+	}
 	if (argc == 0)
-		usage();
+		fprintf(stderr, usage, argv[0]);
 
 	cmd = argv;
 
