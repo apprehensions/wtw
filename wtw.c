@@ -1,3 +1,4 @@
+/* See LICENSE file for copyright and license details. */
 #define _GNU_SOURCE
 #include <signal.h>
 #include <stdlib.h>
@@ -10,12 +11,11 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <poll.h>
-#include <wlr/util/box.h>
 #include <wayland-client.h>
-#include <pixman-1/pixman.h>
 
 #include "arg.h"
 #include "drwl.h"
+#include "poolbuf.h"
 #include "xdg-shell-protocol.h"
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 
@@ -23,14 +23,7 @@
 
 char *argv0;
 
-static pixman_color_t colors[2] = {
-	{ 0xbbbb, 0xbbbb, 0xbbbb, 0xffff },
-	{ 0x0000, 0x0000, 0x0000, 0x0000 }
-};
-
-static char delimeter[] = "\4";
-static const char *font_name = "monospace:size=16";
-static int period = 5;
+#include "config.h"
 
 static struct wl_display *display;
 static struct wl_registry *registry;
@@ -39,8 +32,7 @@ static struct wl_compositor *compositor;
 static struct wl_surface *surface;
 static struct zwlr_layer_shell_v1 *layer_shell;
 static struct zwlr_layer_surface_v1 *layer_surface;
-static struct fcft_font *font;
-static int32_t width = 0, height = 0, x = 0, y = 0;
+static Drwl *drw;
 
 static char **cmd;
 static pid_t cmdpid;
@@ -50,21 +42,8 @@ static int signal_fd = -1;
 static size_t len;
 static size_t cap;
 
-
 static bool restart = false;
 static bool running = false;
-
-pixman_color_t
-parse_color(const char *hex_color)
-{
-	uint32_t h = strtoul(hex_color, NULL, 16);
-	return (pixman_color_t){
-		.red   = ((h >> 24) & 0xFF) * 0x101,
-		.green = ((h >> 16) & 0xFF) * 0x101,
-		.blue  = ((h >> 8) & 0xFF) * 0x101,
-		.alpha = (h & 0xFF) * 0x101,
-	};
-}
 
 static int
 start_cmd(void)
@@ -116,9 +95,8 @@ reap(void)
 		}
 		if (p == 0)
 			break;
-		if (p == cmdpid && (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))) {
+		if (p == cmdpid && (WIFEXITED(wstatus) || WIFSIGNALED(wstatus)))
 			cmdpid = 0;
-		}
 	}
 	return 0;
 }
@@ -126,13 +104,16 @@ reap(void)
 static int
 read_text(void)
 {
-	int dlen = strlen(delimeter);
+	char *line;
+	int llen, dlen = strlen(delimeter);
 
 	len = 0;
 	for (;;) {
 		if (len + dlen + 2 > cap) {
-			// buffer must have sufficient capacity to
-			// store delimeter string, \n and \0 in one read
+			/* 
+			 * Buffer must have sufficient capacity to
+			 * store delimeter string, \n and \0 in one read.
+			 */
 			cap = cap ? cap * 2 : INITIAL_CAPACITY;
 			if (!(text = realloc(text, cap))) {
 				perror("realloc:");
@@ -140,7 +121,7 @@ read_text(void)
 			}
 		}
 
-		char *line = &text[len];
+		line = &text[len];
 		if (fgets(line, cap - len, inputf) == NULL) {
 			if (!feof(inputf)) {
 				perror("fgets:");
@@ -155,7 +136,7 @@ read_text(void)
 			break;
 		}
 
-		int llen = strlen(line);
+		llen = strlen(line);
 
 		if (line[llen - 1] == '\n') {
 			line[--llen] = '\0';
@@ -174,71 +155,32 @@ read_text(void)
 }
 
 static void
-wl_buffer_release(void *data, struct wl_buffer *wl_buffer)
-{
-	wl_buffer_destroy(wl_buffer);
-}
-
-static const struct wl_buffer_listener wl_buffer_listener = {
-	.release = wl_buffer_release,
-};
-
-static void
 render(void)
 {
-	uint32_t stride = width * 4;
-	uint32_t size = stride * height;
-	int fd;
-	uint32_t *data;
-	struct wl_shm_pool *pool;
-	struct wl_buffer *buffer;
-	pixman_image_t *pix;
-	pixman_region32_t clip;
 	int ty = y;
+	char *line;
+	PoolBuf *buf;
 
 	if (width < 0 || height < 0)
 		return;
-
-	fd = memfd_create("wtw-wayland-shm-buffer-pool",
-		MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (fd == -1)
-		return;
-
-	if ((ftruncate(fd, size)) == -1) {
-		close(fd);
+	
+	if (!(buf = poolbuf_create(shm, width, height))) {
+		fputs("failed to create draw buffer", stderr);
 		return;
 	}
 
-	data = mmap(NULL, size,
-			PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (data == MAP_FAILED) {
-		close(fd);
-		return;
+	drwl_prepare_drawing(drw, width, height, buf->data, buf->stride);
+
+	for (line = text; line < text + len; line += strlen(line) + 1) {
+		drwl_text(drw, x, ty, width, drw->font->height, 0, line, 0);
+		ty += drw->font->height;
 	}
 
-	pool = wl_shm_create_pool(shm, fd, size);
-	buffer = wl_shm_pool_create_buffer(pool, 0,
-			width, height, stride, WL_SHM_FORMAT_ARGB8888);
-	wl_buffer_add_listener(buffer, &wl_buffer_listener, NULL);
-	wl_shm_pool_destroy(pool);
-	close(fd);
+	drwl_finish_drawing(drw);
 
-	pix = pixman_image_create_bits_no_clear(
-		PIXMAN_a8r8g8b8, width, height, data, stride);
-	pixman_region32_init_rect(&clip, 0, 0, width, height);
-	pixman_image_set_clip_region32(pix, &clip);
-	pixman_region32_fini(&clip);
-
-	for (char *line = text; line < text + len; line += strlen(line) + 1) {
-		drwl_text(pix, font, x, ty, width, font->height, 0, line, &colors[0], &colors[1]);
-		ty += font->height;
-	}
-
-	pixman_image_unref(pix);
-	munmap(data, size);
-	wl_surface_attach(surface, buffer, 0, 0);
-	wl_buffer_destroy(buffer);
+	wl_surface_attach(surface, buf->wl_buf, 0, 0);
 	wl_surface_damage_buffer(surface, 0, 0, width, height);
+	poolbuf_destroy(buf);
 	wl_surface_commit(surface);
 }
 
@@ -329,12 +271,14 @@ setup(void)
 		return -1;
 	}
 
-	fcft_init(FCFT_LOG_COLORIZE_AUTO, 0, FCFT_LOG_CLASS_WARNING);
-	fcft_set_scaling_filter(FCFT_SCALING_FILTER_LANCZOS3);
-	if (!(font = fcft_from_name(1, &font_name, NULL))) {
-		fprintf(stderr, "bad font\n");
+	drwl_init();
+	if (!(drw = drwl_create())) {
+		fputs("failed to create drwl context", stderr);
 		return -1;
 	}
+	if (!(drwl_load_font(drw, 1, &font_name, NULL)))
+		return -1;
+	drwl_setscheme(drw, scheme);
 
 	surface = wl_compositor_create_surface(compositor);
 	layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, surface,
@@ -433,8 +377,8 @@ cleanup(void)
 		return;
 	if (signal_fd > 0)
 		close(signal_fd);
-	if (font)
-		fcft_destroy(font);
+	if (drw)
+		drwl_destroy(drw);
 	if (layer_surface)
 		zwlr_layer_surface_v1_destroy(layer_surface);
 	if (layer_shell)
@@ -445,7 +389,7 @@ cleanup(void)
 		wl_compositor_destroy(compositor);
 	if (shm)
 		wl_shm_destroy(shm);
-	fcft_fini();
+	drwl_fini();
 	wl_registry_destroy(registry);
 	wl_display_disconnect(display);
 }
@@ -457,8 +401,8 @@ main(int argc, char *argv[])
 
 	ARGBEGIN {
 	case '?': usage();
-	case 'b': colors[1] = parse_color(EARGF(usage())); break;
-	case 'c': colors[0] = parse_color(EARGF(usage())); break;
+	case 'b': scheme[ColBg] = strtoul(EARGF(usage()), NULL, 16); break;
+	case 'c': scheme[ColFg] = strtoul(EARGF(usage()), NULL, 16); break;
 	case 'f': font_name = EARGF(usage()); break;
 	case 'p': period = atoi(EARGF(usage())); break;
 	case 'w': width = atoi(EARGF(usage())); break;
