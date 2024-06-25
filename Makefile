@@ -1,5 +1,7 @@
 .POSIX:
 
+VERSION = 0
+
 PREFIX = /usr/local
 
 PKG_CONFIG = pkg-config
@@ -8,8 +10,9 @@ PKGS = wayland-client fcft pixman-1
 INCS = `$(PKG_CONFIG) --cflags $(PKGS)`
 LIBS = `$(PKG_CONFIG) --libs $(PKGS)`
 
-TWCFLAGS = -pedantic -Wall $(INCS) $(CPPFLAGS) $(CFLAGS)
-LDLIBS   = $(LIBS)
+TWCPPFLAGS = -DVERSION=\"$(VERSION)\"
+TWCFLAGS   = -pedantic -Wall $(INCS) $(TWCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
+LDLIBS     = $(LIBS)
 
 all: wtw
 

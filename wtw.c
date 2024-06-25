@@ -408,7 +408,7 @@ main(int argc, char *argv[])
 	int opt;
 	int ret = EXIT_FAILURE;
 
-	while ((opt = getopt(argc, argv, "b:c:f:p:P:w:h:x:y:")) != -1) {
+	while ((opt = getopt(argc, argv, "b:c:f:p:P:vw:h:x:y:")) != -1) {
 		switch (opt) {
 		case 'b':
 		case 'c':
@@ -417,6 +417,7 @@ main(int argc, char *argv[])
 		case 'f': font_name = optarg; break;
 		case 'p': period = atoi(optarg); break;
 		case 'P': pad = atoi(optarg); break;
+		case 'v': puts("wtw " VERSION); return EXIT_SUCCESS;
 		case 'w': width = atoi(optarg); break;
 		case 'h': height = atoi(optarg); break;
 		case 'x': x = atoi(optarg); break;
