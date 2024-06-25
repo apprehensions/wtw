@@ -409,8 +409,10 @@ main(int argc, char *argv[])
 	}
 	argv++;
 	argc--;
-	if (argc < 1)
+	if (argc < 1) {
 		fprintf(stderr, usage, argv[0]);
+		return ret;
+	}
 
 	cmd = argv;
 
