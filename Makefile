@@ -13,20 +13,21 @@ LDLIBS   = $(LIBS)
 
 all: wtw
 
+.c.o:
+	$(CC) -o $@ -c $(TWCFLAGS) -c $<
+
 wtw.o: xdg-shell-protocol.h wlr-layer-shell-unstable-v1-protocol.h
+
 wtw: wtw.o xdg-shell-protocol.o wlr-layer-shell-unstable-v1-protocol.o
 	$(CC) $(LDFLAGS) -o $@ wtw.o xdg-shell-protocol.o wlr-layer-shell-unstable-v1-protocol.o $(LDLIBS)
 
 WAYLAND_PROTOCOLS = `$(PKG_CONFIG) --variable=pkgdatadir wayland-protocols`
 WAYLAND_SCANNER   = `$(PKG_CONFIG) --variable=wayland_scanner wayland-scanner`
 
-xdg-shell-protocol.o: xdg-shell-protocol.h
 xdg-shell-protocol.c:
 	$(WAYLAND_SCANNER) private-code $(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
 xdg-shell-protocol.h:
 	$(WAYLAND_SCANNER) client-header $(WAYLAND_PROTOCOLS)/stable/xdg-shell/xdg-shell.xml $@
-
-wlr-layer-shell-unstable-v1-protocol.o: wlr-layer-shell-unstable-v1-protocol.h
 wlr-layer-shell-unstable-v1-protocol.c:
 	$(WAYLAND_SCANNER) private-code wlr-layer-shell-unstable-v1.xml $@
 wlr-layer-shell-unstable-v1-protocol.h:
@@ -42,8 +43,5 @@ install: all
 
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/wtw
-
-.c.o:
-	$(CC) -o $@ -c $(TWCFLAGS) -c $<
-
+	
 .PHONY: all clean install uninstall
