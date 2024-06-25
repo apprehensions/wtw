@@ -8,6 +8,8 @@
 #include <fcft/fcft.h>
 #include <pixman-1/pixman.h>
 
+#define BETWEEN(X, A, B) ((A) <= (X) && (X) <= (B))
+
 enum { ColFg, ColBg }; /* colorscheme index */
 
 typedef struct {
@@ -16,29 +18,46 @@ typedef struct {
 	uint32_t *scheme;
 } Drwl;
 
-/* See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/ for details. */
-static const uint8_t utf8d[] = {
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 00..1f
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 20..3f
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 40..5f
-	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, // 60..7f
-	1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9, // 80..9f
-	7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7, // a0..bf
-	8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2, // c0..df
-	0xa,0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x3,0x4,0x3,0x3, // e0..ef
-	0xb,0x6,0x6,0x6,0x5,0x8,0x8,0x8,0x8,0x8,0x8,0x8,0x8,0x8,0x8,0x8, // f0..ff
-	0x0,0x1,0x2,0x3,0x5,0x8,0x7,0x1,0x1,0x1,0x4,0x6,0x1,0x1,0x1,0x1, // s0..s0
-	1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,0,1,0,1,1,1,1,1,1, // s1..s2
-	1,2,1,1,1,1,1,2,1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1, // s3..s4
-	1,2,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,3,1,1,1,1,1,1, // s5..s6
-	1,3,1,1,1,1,1,3,1,3,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,1,1,1,1,1,1, // s7..s8
-};
+#define UTF_INVALID 0xFFFD
+#define UTF_SIZ     4
+
+static const unsigned char utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
+static const unsigned char utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
+static const uint32_t utfmin[UTF_SIZ + 1] = {       0,    0,  0x80,  0x800,  0x10000};
+static const uint32_t utfmax[UTF_SIZ + 1] = {0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
 
 static inline uint32_t
-utf8decode(uint8_t byte)
+utf8decodebyte(const char c, size_t *i)
 {
-	uint32_t type = utf8d[byte];
-	return !utf8d[256 + type] ? (0xff >> type) & (byte) : 0xFFFD;
+	for (*i = 0; *i < (UTF_SIZ + 1); ++(*i))
+		if (((unsigned char)c & utfmask[*i]) == utfbyte[*i])
+			return (unsigned char)c & ~utfmask[*i];
+	return 0;
+}
+
+static inline size_t
+utf8decode(const char *c, uint32_t *u)
+{
+	size_t i, j, len, type;
+	uint32_t udecoded;
+
+	*u = UTF_INVALID;
+	udecoded = utf8decodebyte(c[0], &len);
+	if (!BETWEEN(len, 1, UTF_SIZ))
+		return 1;
+	for (i = 1, j = 1; i < UTF_SIZ && j < len; ++i, ++j) {
+		udecoded = (udecoded << 6) | utf8decodebyte(c[i], &type);
+		if (type)
+			return j;
+	}
+	if (j < len)
+		return 0;
+	*u = udecoded;
+	if (!BETWEEN(*u, utfmin[len], utfmax[len]) || BETWEEN(*u, 0xD800, 0xDFFF))
+		*u = UTF_INVALID;
+	for (i = 1; *u > utfmax[i]; ++i)
+		;
+	return len;
 }
 
 static int
@@ -72,8 +91,8 @@ drwl_setfont(Drwl *drwl, struct fcft_font *font)
 
 /* 
  * Returned font is set within the drawing context if given.
- * Caller must call drwl_destroy_font on returned font when done using it, otherwise
- * use drwl_destroy when instead given a drwl context.
+ * Caller must call drwl_destroy_font on returned font when done using it, 
+ * otherwise use drwl_destroy when instead given a drwl context.
  */
 static struct fcft_font *
 drwl_load_font(Drwl *drwl, size_t fontcount,
@@ -137,8 +156,8 @@ drwl_prepare_drawing(Drwl *drwl, unsigned int w, unsigned int h,
 
 static void
 drwl_rect(Drwl *drwl,
-          int x, int y, unsigned int w, unsigned int h,
-          int filled, int invert)
+		int x, int y, unsigned int w, unsigned int h,
+		int filled, int invert)
 {
 	pixman_color_t clr;
 	if (!drwl || !drwl->scheme || !drwl->pix)
@@ -159,17 +178,17 @@ drwl_rect(Drwl *drwl,
 
 static int
 drwl_text(Drwl *drwl,
-          int x, int y, unsigned int w, unsigned int h,
-          unsigned int lpad, const char *text, int invert)
+		int x, int y, unsigned int w, unsigned int h,
+		unsigned int lpad, const char *text, int invert)
 {
 	int ty;
-	int render = x || y || w || h;
+	int utf8charlen, render = x || y || w || h;
 	long x_kern;
-	uint32_t cp, last_cp = 0;
-	pixman_image_t *fg_pix = NULL;
-	const struct fcft_glyph *glyph, *eg;
-	int noellipsis = 0;
+	uint32_t cp = 0, last_cp = 0;
 	pixman_color_t clr;
+	pixman_image_t *fg_pix = NULL;
+	int noellipsis = 0;
+	const struct fcft_glyph *glyph, *eg;
 
 	if (!drwl || (render && (!drwl->scheme || !w || !drwl->pix)) || !text || !drwl->font)
 		return 0;
@@ -187,12 +206,12 @@ drwl_text(Drwl *drwl,
 	}
 
 	// U+2026 == …
-	eg = fcft_rasterize_char_utf32(drwl->font, 0x2026, FCFT_SUBPIXEL_NONE);
+	eg = fcft_rasterize_char_utf32(drwl->font, 0x2026, FCFT_SUBPIXEL_DEFAULT);
 
-	for (const char *p = text; *p; p++) {
-		cp = utf8decode(*p);
+	while (*text) {
+		utf8charlen = utf8decode(text, &cp);
 
-		glyph = fcft_rasterize_char_utf32(drwl->font, cp, FCFT_SUBPIXEL_NONE);
+		glyph = fcft_rasterize_char_utf32(drwl->font, cp, FCFT_SUBPIXEL_DEFAULT);
 		if (!glyph)
 			continue;
 
@@ -204,8 +223,8 @@ drwl_text(Drwl *drwl,
 		ty = y + (h - drwl->font->height) / 2 + drwl->font->ascent;
 
 		/* draw ellipsis if remaining text doesn't fit */
-		if (!noellipsis && x_kern + glyph->advance.x + eg->advance.x > w && *(p + 1) != '\0') {
-			if (drwl_text(drwl, 0, 0, 0, 0, 0, p, 0)
+		if (!noellipsis && x_kern + glyph->advance.x + eg->advance.x > w && *(text + 1) != '\0') {
+			if (drwl_text(drwl, 0, 0, 0, 0, 0, text, 0)
 					- glyph->advance.x < eg->advance.x) {
 				noellipsis = 1;
 			} else {
@@ -231,6 +250,7 @@ drwl_text(Drwl *drwl,
 				PIXMAN_OP_OVER, fg_pix, glyph->pix, drwl->pix, 0, 0, 0, 0,
 				x + glyph->x, ty - glyph->y, glyph->width, glyph->height);
 
+		text += utf8charlen;
 		x += glyph->advance.x;
 		w -= glyph->advance.x;
 	}
@@ -239,6 +259,14 @@ drwl_text(Drwl *drwl,
 		pixman_image_unref(fg_pix);
 
 	return x + (render ? w : 0);
+}
+
+static unsigned int
+drwl_font_getwidth(Drwl *drwl, const char *text)
+{
+	if (!drwl || !drwl->font || !text)
+		return 0;
+	return drwl_text(drwl, 0, 0, 0, 0, 0, text, 0);
 }
 
 static void
