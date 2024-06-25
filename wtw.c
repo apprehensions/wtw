@@ -407,7 +407,9 @@ main(int argc, char *argv[])
 			fprintf(stderr, usage, argv[0]);
 		}
 	}
-	if (argc == 0)
+	argv++;
+	argc--;
+	if (argc < 1)
 		fprintf(stderr, usage, argv[0]);
 
 	cmd = argv;
