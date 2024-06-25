@@ -2,6 +2,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <sys/signalfd.h>
 #include <string.h>
 #include <err.h>
 #include <stdio.h>
@@ -15,12 +16,10 @@
 
 #include "arg.h"
 #include "drwl.h"
-#include "xdg-shell-client-protocol.h"
+#include "xdg-shell-protocol.h"
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 
 #define INITIAL_CAPACITY 2
-
-#define LENGTH(X) (sizeof(X) / sizeof((X)[0]))
 
 char *argv0;
 
@@ -41,19 +40,19 @@ static struct wl_surface *surface;
 static struct zwlr_layer_shell_v1 *layer_shell;
 static struct zwlr_layer_surface_v1 *layer_surface;
 static struct fcft_font *font;
-static int wfd;
-
-static struct wlr_box geom = {0, 0, 0, 0};
+static int32_t width = 0, height = 0, x = 0, y = 0;
 
 static char **cmd;
 static pid_t cmdpid;
 static FILE *inputf;
 static char *text;
+static int signal_fd = -1;
 static size_t len;
 static size_t cap;
-static int spipe[2];
 
-static bool closed = false;
+
+static bool restart = false;
+static bool running = false;
 
 pixman_color_t
 parse_color(const char *hex_color)
@@ -67,15 +66,8 @@ parse_color(const char *hex_color)
 	};
 }
 
-static void
-signal_handler(int s)
-{
-	if (-1 == write(spipe[1], s == SIGCHLD ? "c" : "a", 1))
-		abort();
-}
-
 static int
-start_cmd()
+start_cmd(void)
 {
 	int fds[2];
 	if (pipe(fds) == -1) {
@@ -95,14 +87,11 @@ start_cmd()
 		perror("fork:");
 		return 1;
 	case 0:
-		close(spipe[0]);
-		close(spipe[1]);
-		close(wfd);
 		close(fds[0]);
 		dup2(fds[1], STDOUT_FILENO);
 		setpgid(0, 0);
 		execvp(cmd[0], cmd);
-		exit(1);
+		exit(EXIT_FAILURE);
 	default:
 		break;
 	}
@@ -112,7 +101,7 @@ start_cmd()
 }
 
 static int
-reap()
+reap(void)
 {
 	for (;;) {
 		int wstatus;
@@ -122,6 +111,7 @@ reap()
 				errno = 0;
 				break;
 			}
+			perror("waitpid:");
 			return -1;
 		}
 		if (p == 0)
@@ -134,7 +124,7 @@ reap()
 }
 
 static int
-read_text()
+read_text(void)
 {
 	int dlen = strlen(delimeter);
 
@@ -194,12 +184,22 @@ static const struct wl_buffer_listener wl_buffer_listener = {
 };
 
 static void
-render()
+render(void)
 {
-	uint32_t stride = geom.width * 4;
-	uint32_t size = stride * geom.height;
+	uint32_t stride = width * 4;
+	uint32_t size = stride * height;
+	int fd;
+	uint32_t *data;
+	struct wl_shm_pool *pool;
+	struct wl_buffer *buffer;
+	pixman_image_t *pix;
+	pixman_region32_t clip;
+	int ty = y;
 
-	int fd = memfd_create("wtw-wayland-shm-buffer-pool",
+	if (width < 0 || height < 0)
+		return;
+
+	fd = memfd_create("wtw-wayland-shm-buffer-pool",
 		MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd == -1)
 		return;
@@ -209,37 +209,36 @@ render()
 		return;
 	}
 
-	uint32_t *data = mmap(NULL, size,
+	data = mmap(NULL, size,
 			PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (data == MAP_FAILED) {
 		close(fd);
 		return;
 	}
 
-	struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
-	struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0,
-			geom.width, geom.height, stride, WL_SHM_FORMAT_ARGB8888);
+	pool = wl_shm_create_pool(shm, fd, size);
+	buffer = wl_shm_pool_create_buffer(pool, 0,
+			width, height, stride, WL_SHM_FORMAT_ARGB8888);
 	wl_buffer_add_listener(buffer, &wl_buffer_listener, NULL);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 
-	pixman_image_t *pix = pixman_image_create_bits_no_clear(
-		PIXMAN_a8r8g8b8, geom.width, geom.height, data, stride);
-	pixman_region32_t clip;
-	pixman_region32_init_rect(&clip, 0, 0, geom.width, geom.height);
+	pix = pixman_image_create_bits_no_clear(
+		PIXMAN_a8r8g8b8, width, height, data, stride);
+	pixman_region32_init_rect(&clip, 0, 0, width, height);
 	pixman_image_set_clip_region32(pix, &clip);
 	pixman_region32_fini(&clip);
 
-	int y = geom.y;
 	for (char *line = text; line < text + len; line += strlen(line) + 1) {
-		drwl_text(pix, font, geom.x, y, geom.width, font->height, 0, line, &colors[0], &colors[1]);
-		y += font->height;
+		drwl_text(pix, font, x, ty, width, font->height, 0, line, &colors[0], &colors[1]);
+		ty += font->height;
 	}
 
 	pixman_image_unref(pix);
 	munmap(data, size);
 	wl_surface_attach(surface, buffer, 0, 0);
-	wl_surface_damage_buffer(surface, 0, 0, geom.width, geom.height);
+	wl_buffer_destroy(buffer);
+	wl_surface_damage_buffer(surface, 0, 0, width, height);
 	wl_surface_commit(surface);
 }
 
@@ -247,20 +246,15 @@ static void
 layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *surface,
                         uint32_t serial, uint32_t w, uint32_t h)
 {
+	width = w;
+	height = h;
 	zwlr_layer_surface_v1_ack_configure(surface, serial);
-
-	if ((geom.width != 0 && geom.height != 0) && w == geom.width && h == geom.height)
-		return;
-
-	geom.width = w;
-	geom.height = h;
-	render();
 }
 
 static void
 layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface)
 {
-	closed = true;
+	running = false;
 }
 
 static const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
@@ -295,15 +289,171 @@ static void
 usage(void)
 {
 	fprintf(stderr,
-		"usage: wtw [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
-		"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n");
-	exit(1);
+		"usage: %s [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
+		"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n", argv0);
+	exit(EXIT_SUCCESS);
+}
+
+static int
+setup(void)
+{
+	sigset_t mask;
+
+	if (!(display = wl_display_connect(NULL))) {
+		fprintf(stderr, "could not connect to display\n");
+		return -1;
+	}
+
+	registry = wl_display_get_registry(display);
+	wl_registry_add_listener(registry, &registry_listener, NULL);
+	wl_display_roundtrip(display);
+
+	if (!compositor || !shm || !layer_shell) {
+		fputs("unsupported compositor", stderr);
+		return -1;
+	}
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
+	sigaddset(&mask, SIGALRM);
+	sigaddset(&mask, SIGCHLD);
+
+	if (sigprocmask(SIG_BLOCK, &mask, NULL) < 0) {
+		perror("sigprocmask");
+		return -1;
+	}
+
+	if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK)) < 0) {
+		perror("signalfd");
+		return -1;
+	}
+
+	fcft_init(FCFT_LOG_COLORIZE_AUTO, 0, FCFT_LOG_CLASS_WARNING);
+	fcft_set_scaling_filter(FCFT_SCALING_FILTER_LANCZOS3);
+	if (!(font = fcft_from_name(1, &font_name, NULL))) {
+		fprintf(stderr, "bad font\n");
+		return -1;
+	}
+
+	surface = wl_compositor_create_surface(compositor);
+	layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, surface,
+		NULL, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "wtw");
+
+	zwlr_layer_surface_v1_add_listener(
+		layer_surface, &layer_surface_listener, NULL);
+    zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
+	zwlr_layer_surface_v1_set_anchor(layer_surface,
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+	wl_surface_commit(surface);
+
+	return 0;
+}
+
+static int
+run(void)
+{
+	struct signalfd_siginfo si;
+	struct pollfd fds[3] = {
+		{ .fd = wl_display_get_fd(display), .events = POLLIN },
+		{ .fd = signal_fd,                  .events = POLLIN },
+		{ .fd = -1,                         .events = POLLIN },
+	};
+	
+	restart = running = true;
+	while (running) {
+		if (wl_display_prepare_read(display) < 0) {
+			if (wl_display_dispatch_pending(display) < 0) {
+				perror("wl_display_dispatch_pending:");
+				break;
+			}
+		}
+
+		wl_display_flush(display);
+
+		if (restart && cmdpid == 0 && inputf == NULL) {
+			restart = false;
+			start_cmd();
+		}
+
+		fds[2].fd = inputf ? fileno(inputf) : -1;
+
+		if (poll(fds, 3, -1) < 0) {
+			perror("poll:");
+			return EXIT_FAILURE;
+		}
+		
+		if (fds[1].revents & POLLIN) {
+			ssize_t n = read(signal_fd, &si, sizeof(si));
+			if (n != sizeof(si))
+				perror("signalfd");
+			if (si.ssi_signo == SIGCHLD) {
+				if (reap() < 0)
+					return EXIT_FAILURE;
+				if (period < 0)
+					restart = true;
+				else if (!restart)
+					alarm(period);
+			} else if (si.ssi_signo == SIGALRM && cmdpid == 0)
+				restart = true;
+			else if (si.ssi_signo == SIGINT)
+				return EXIT_FAILURE;
+		}
+
+		if (inputf && fds[2].revents & POLLIN) {
+			if (read_text() < 0)
+				return EXIT_FAILURE;
+			render();
+		}
+
+		if (!(fds[0].revents & POLLIN)) {
+			wl_display_cancel_read(display);
+			continue;
+		}
+
+		if (wl_display_read_events(display) < 0) {
+			perror("wl_display_read_events");
+			return EXIT_FAILURE;
+		}
+
+		if (wl_display_dispatch_pending(display) < 0) {
+			perror("wl_display_dispatch_pending");
+			return EXIT_FAILURE;
+		}
+	}
+
+	return EXIT_SUCCESS;
+}
+
+static void
+cleanup(void)
+{
+	if (!display)
+		return;
+	if (signal_fd > 0)
+		close(signal_fd);
+	if (font)
+		fcft_destroy(font);
+	if (layer_surface)
+		zwlr_layer_surface_v1_destroy(layer_surface);
+	if (layer_shell)
+		zwlr_layer_shell_v1_destroy(layer_shell);
+	if (surface)
+		wl_surface_destroy(surface);
+	if (compositor)
+		wl_compositor_destroy(compositor);
+	if (shm)
+		wl_shm_destroy(shm);
+	fcft_fini();
+	wl_registry_destroy(registry);
+	wl_display_disconnect(display);
 }
 
 int
 main(int argc, char *argv[])
 {
-	int exit_code = EXIT_FAILURE;
+	int ret = EXIT_FAILURE;
 
 	ARGBEGIN {
 	case '?': usage();
@@ -311,10 +461,10 @@ main(int argc, char *argv[])
 	case 'c': colors[0] = parse_color(EARGF(usage())); break;
 	case 'f': font_name = EARGF(usage()); break;
 	case 'p': period = atoi(EARGF(usage())); break;
-	case 'w': geom.width = atoi(EARGF(usage())); break;
-	case 'h': geom.height = atoi(EARGF(usage())); break;
-	case 'x': geom.x = atoi(EARGF(usage())); break;
-	case 'y': geom.y = atoi(EARGF(usage())); break;
+	case 'w': width = atoi(EARGF(usage())); break;
+	case 'h': height = atoi(EARGF(usage())); break;
+	case 'x': x = atoi(EARGF(usage())); break;
+	case 'y': y = atoi(EARGF(usage())); break;
 	default:
 		warn("bad option: -%c", ARGC());
 		usage();
@@ -325,157 +475,11 @@ main(int argc, char *argv[])
 
 	cmd = argv;
 
-	if (!(display = wl_display_connect(NULL))) {
-		fprintf(stderr, "could not connect to display\n");
-		return exit_code;
-	}
-	registry = wl_display_get_registry(display);
-	wl_registry_add_listener(registry, &registry_listener, NULL);
-	if (wl_display_roundtrip(display) < 0) {
-		fprintf(stderr, "wayland roundtrip failed\n");
+	if (setup() < 0)
 		goto err;
-	}
 
-	if (!compositor || !shm || !layer_shell) {
-		fprintf(stderr, "wl_compositor, wl_shm or zwlr_layer_shell_v1 is missing\n");
-		goto err;
-	}
-
-	if (pipe(spipe) == -1) {
-		perror("pipe:");
-		goto err;
-	}
-
-	struct sigaction sa = {0};
-	sa.sa_handler = signal_handler;
-	sa.sa_flags = SA_RESTART;
-
-	if (sigaction(SIGCHLD, &sa, NULL) == -1 || sigaction(SIGALRM, &sa, NULL) == -1) {
-		perror("pipe:");
-		goto err;
-	}
-
-	fcft_init(FCFT_LOG_COLORIZE_AUTO, 0, FCFT_LOG_CLASS_WARNING);
-	fcft_set_scaling_filter(FCFT_SCALING_FILTER_LANCZOS3);
-	if (!(font = fcft_from_name(1, &font_name, NULL))) {
-		fprintf(stderr, "bad font\n");
-		goto err;
-	}
-
-	exit_code = EXIT_SUCCESS;
-
-	surface = wl_compositor_create_surface(compositor);
-	layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-		layer_shell, surface, NULL,
-		ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "text");
-
-	zwlr_layer_surface_v1_add_listener(layer_surface, &layer_surface_listener, NULL);
-    zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
-	zwlr_layer_surface_v1_set_anchor(layer_surface,
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-
-	wl_surface_commit(surface);
-	wfd = wl_display_get_fd(display);
-	
-	bool restart_now = true;
-
-	while (!closed) {
-		wl_display_flush(display);
-
-		if (restart_now && cmdpid == 0 && inputf == NULL) {
-			restart_now = false;
-			start_cmd();
-		}
-
-		int inputfd = 0;
-		if (inputf != NULL) {
-			inputfd = fileno(inputf);
-		}
-
-		struct pollfd fds[] = {
-			{ .fd = spipe[0], .events = POLLIN },
-			{ .fd = wfd,      .events = POLLIN },
-			{ .fd = inputfd,  .events = POLLIN }
-		};
-
-		int fds_len = LENGTH(fds);
-		if (inputfd == 0) {
-			fds_len--;
-		}
-
-		if (poll(fds, LENGTH(fds), -1) == -1) {
-			if (errno == EINTR) {
-				errno = 0;
-				continue;
-			}
-			perror("poll:");
-			exit_code = EXIT_FAILURE;
-			goto err;
-		}
-		if (inputf && (fds[2].revents & POLLIN || fds[2].revents & POLLHUP)) {
-			if (read_text() < 0) {
-				exit_code = EXIT_FAILURE;
-				goto err;
-			}
-			render();
-		}
-
-		if (fds[0].revents & POLLIN) {
-			char s;
-			if (read(spipe[0], &s, 1) == -1) {
-				perror("read:");
-				exit_code = EXIT_FAILURE;
-				goto err;
-			}
-
-			if (s == 'c') {
-				if (reap() < 0) {
-					perror("waitpid:");
-					exit_code = EXIT_FAILURE;
-					goto err;
-				}
-				if (period < 0) {
-					restart_now = true;
-				} else if (!restart_now) {
-					alarm(period);
-				}
-			} else if (s == 'a' && cmdpid == 0) {
-				restart_now = true;
-			}
-		}
-
-		if (fds[1].revents & POLLIN)
-			wl_display_dispatch(display);
-		if (fds[1].revents & POLLERR) {
-			fprintf(stderr, "wayland socket disconnect\n");
-			exit_code = EXIT_FAILURE;
-			goto err;
-		}
-		if (fds[1].revents & POLLHUP) {
-			fprintf(stderr, "wayland socket disconnect\n");
-			exit_code = EXIT_FAILURE;
-			goto err;
-		}
-	}
-
+	ret = run();
 err:
-	if (layer_shell != NULL)
-	    zwlr_layer_shell_v1_destroy(layer_shell);
-	if (shm != NULL)
-	    wl_shm_destroy(shm);
-	if (compositor != NULL)
-	    wl_compositor_destroy(compositor);
-	if (registry != NULL)
-	    wl_registry_destroy(registry);
-	if (display != NULL)
-	    wl_display_disconnect(display);
-	if (font != NULL)
-		fcft_destroy(font);
-	wl_display_disconnect(display);
-
-	return exit_code;
+	cleanup();
+	return ret;
 }
-
