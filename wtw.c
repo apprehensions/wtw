@@ -165,7 +165,7 @@ render(void)
 		return;
 	
 	if (!(buf = poolbuf_create(shm, width, height))) {
-		fputs("failed to create draw buffer", stderr);
+		fputs("failed to create draw buffer\n", stderr);
 		return;
 	}
 
@@ -242,7 +242,7 @@ setup(void)
 	wl_display_roundtrip(display);
 
 	if (!compositor || !shm || !layer_shell) {
-		fputs("unsupported compositor", stderr);
+		fputs("unsupported compositor\n", stderr);
 		return -1;
 	}
 
@@ -264,7 +264,7 @@ setup(void)
 
 	drwl_init();
 	if (!(drw = drwl_create())) {
-		fputs("failed to create drwl context", stderr);
+		fputs("failed to create drwl context\n", stderr);
 		return -1;
 	}
 	if (!(drwl_load_font(drw, 1, &font_name, NULL)))
