@@ -50,20 +50,20 @@ start_cmd(void)
 {
 	int fds[2];
 	if (pipe(fds) == -1) {
-		perror("pipe:");
+		perror("pipe");
 		return -1;
 	}
 
 	inputf = fdopen(fds[0], "r");
 	if (inputf == NULL) {
-		perror("pipe:");
+		perror("fdopen");
 		return -1;
 	}
 
 	cmdpid = fork();
 	switch (cmdpid) {
 	case -1:
-		perror("fork:");
+		perror("fork");
 		return 1;
 	case 0:
 		close(fds[0]);
@@ -90,7 +90,7 @@ reap(void)
 				errno = 0;
 				break;
 			}
-			perror("waitpid:");
+			perror("waitpid");
 			return -1;
 		}
 		if (p == 0)
@@ -116,7 +116,7 @@ read_text(void)
 			 */
 			cap = cap ? cap * 2 : INITIAL_CAPACITY;
 			if (!(text = realloc(text, cap))) {
-				perror("realloc:");
+				perror("realloc");
 				return -1;
 			}
 		}
@@ -124,12 +124,12 @@ read_text(void)
 		line = &text[len];
 		if (fgets(line, cap - len, inputf) == NULL) {
 			if (!feof(inputf)) {
-				perror("fgets:");
+				perror("fgets");
 				return -1;
 			}
 
 			if (fclose(inputf) == -1) {
-				perror("fclose:");
+				perror("fclose");
 				return -1;
 			}
 			inputf = NULL;
@@ -300,7 +300,7 @@ run(void)
 	while (running) {
 		if (wl_display_prepare_read(display) < 0) {
 			if (wl_display_dispatch_pending(display) < 0) {
-				perror("wl_display_dispatch_pending:");
+				perror("wl_display_dispatch_pending");
 				break;
 			}
 		}
@@ -315,7 +315,7 @@ run(void)
 		fds[2].fd = inputf ? fileno(inputf) : -1;
 
 		if (poll(fds, 3, -1) < 0) {
-			perror("poll:");
+			perror("poll");
 			return EXIT_FAILURE;
 		}
 		
