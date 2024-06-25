@@ -43,8 +43,6 @@ create_shm(void)
 	char name[] = "/drwl-XXXXXX";
 	int retries = 100;
 
-	puts("create shm");
-
 	do {
 		randname(name + sizeof(name) - 7);
 		--retries;
