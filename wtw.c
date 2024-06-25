@@ -167,12 +167,12 @@ render(void)
 	/* Use maximum text line width and height */
 	for (line = text; line < text + len; line += strlen(line) + 1) {
 		tw = drwl_font_getwidth(drw, line);
-		w = MIN(MAX(w, tw), width);
+		w = MAX(w, tw);
 		h += drw->font->height;
 	}
 
-	w += pad * 2;
-	h += pad * 2;
+	w = MIN(w + pad * 2 + x, width);
+	h = MIN(h + pad * 2 + y, height);
 
 	if (!(buf = poolbuf_create(shm, w, h))) {
 		fputs("failed to create draw buffer\n", stderr);
@@ -184,7 +184,7 @@ render(void)
 	drwl_rect(drw, x, y, w, h, 1, 1);
 
 	for (line = text; line < text + len; line += strlen(line) + 1) {
-		drwl_text(drw, x + pad, ty, w, drw->font->height, 0, line, 0);
+		drwl_text(drw, x + pad, ty, w - pad * 2, drw->font->height, 0, line, 0);
 		ty += drw->font->height;
 	}
 
@@ -343,7 +343,7 @@ run(void)
 					alarm(period);
 			} else if (si.ssi_signo == SIGALRM && cmdpid == 0)
 				restart = true;
-			else if (si.ssi_signo == SIGINT)
+			else
 				return EXIT_FAILURE;
 		}
 
