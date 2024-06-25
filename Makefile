@@ -4,7 +4,7 @@ PREFIX = /usr/local
 
 PKG_CONFIG = pkg-config
 
-PKGS = wlroots wayland-client fcft pixman-1
+PKGS = wayland-client fcft pixman-1
 INCS = `$(PKG_CONFIG) --cflags $(PKGS)`
 LIBS = `$(PKG_CONFIG) --libs $(PKGS)`
 
