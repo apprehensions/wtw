@@ -57,8 +57,7 @@ start_cmd(void)
 		return -1;
 	}
 
-	inputf = fdopen(fds[0], "r");
-	if (inputf == NULL) {
+	if (!(inputf = fdopen(fds[0], "r"))) {
 		perror("fdopen");
 		return -1;
 	}
@@ -73,6 +72,7 @@ start_cmd(void)
 		dup2(fds[1], STDOUT_FILENO);
 		setpgid(0, 0);
 		execvp(cmd[0], cmd);
+		perror("execvp");
 		exit(EXIT_FAILURE);
 	default:
 		break;
@@ -82,26 +82,22 @@ start_cmd(void)
 	return 0;
 }
 
-static int
+static void
 reap(void)
 {
-	for (;;) {
-		int wstatus;
-		pid_t p = waitpid(-1, &wstatus, cmdpid == 0 ? WNOHANG : 0);
-		if (p == -1) {
-			if (cmdpid == 0 && errno == ECHILD) {
-				errno = 0;
-				break;
-			}
+	pid_t p;
+	int status;
+
+	do {
+		if ((p = waitpid(-1, &status, cmdpid == 0 ? WNOHANG : 0)) < 0) {
 			perror("waitpid");
-			return -1;
+			return;
 		}
-		if (p == 0)
-			break;
-		if (p == cmdpid && (WIFEXITED(wstatus) || WIFSIGNALED(wstatus)))
+		if (p == cmdpid) {
 			cmdpid = 0;
-	}
-	return 0;
+			return;
+		}
+	} while (!WIFEXITED(status) && !WIFSIGNALED(status));
 }
 
 static int
@@ -323,7 +319,7 @@ run(void)
 
 		wl_display_flush(display);
 
-		if (restart && cmdpid == 0 && inputf == NULL) {
+		if (restart && cmdpid == 0 && !inputf) {
 			restart = false;
 			start_cmd();
 		}
@@ -334,14 +330,13 @@ run(void)
 			perror("poll");
 			return EXIT_FAILURE;
 		}
-		
+
 		if (fds[1].revents & POLLIN) {
 			ssize_t n = read(signal_fd, &si, sizeof(si));
 			if (n != sizeof(si))
 				perror("signalfd");
 			if (si.ssi_signo == SIGCHLD) {
-				if (reap() < 0)
-					return EXIT_FAILURE;
+				reap();
 				if (period < 0)
 					restart = true;
 				else if (!restart)
@@ -350,6 +345,12 @@ run(void)
 				restart = true;
 			else if (si.ssi_signo == SIGINT)
 				return EXIT_FAILURE;
+		}
+
+		/* Command error */
+		if (fds[2].revents & POLLHUP) {
+			inputf = NULL;
+			return EXIT_FAILURE;
 		}
 
 		if (inputf && fds[2].revents & POLLIN) {
@@ -425,8 +426,8 @@ main(int argc, char *argv[])
 			return ret;
 		}
 	}
-	argv++;
-	argc--;
+	argv += optind;
+	argc -= optind;
 	if (argc < 1) {
 		fprintf(stderr, usage);
 		return ret;
