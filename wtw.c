@@ -20,7 +20,7 @@
 #define INITIAL_CAPACITY 2
 
 static const char usage[] =
-	"usage: %s [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
+	"usage: wtw [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period]\n"
 	"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n";
 
 #include "config.h"
@@ -404,13 +404,14 @@ main(int argc, char *argv[])
 		case 'x': x = atoi(optarg); break;
 		case 'y': y = atoi(optarg); break;
 		default:
-			fprintf(stderr, usage, argv[0]);
+			fprintf(stderr, usage);
+			return ret;
 		}
 	}
 	argv++;
 	argc--;
 	if (argc < 1) {
-		fprintf(stderr, usage, argv[0]);
+		fprintf(stderr, usage);
 		return ret;
 	}
 
