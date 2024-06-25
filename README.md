@@ -1,16 +1,30 @@
 # wtw
 
-wtw is a simple text widget for wlroots; ported from [stw](https://github.com/sineemore/stw), with wtw inheriting it's behavior.
+wtw is a simple text widget for wlroot compositors; ported from
+[stw](https://github.com/sineemore/stw), with wtw inheriting it's behavior.
 
 ![](example.png)
 
-## Dependencies
-* wlroots
-* wayland-protocols \*
+## Building
+
+To build wtw first ensure that you have the following dependencies:
+
+* wayland
+* wayland-protocols
 * fcft
 * pixman
-* `memfd_create`
-* make(1) \*
-* wlroots compositor supporting `zwlr-layer-shell-unstable-v1`
+* pkg-config
 
-\* _compile-time dependency_
+Afterwards, run:
+```
+make
+make install
+```
+
+## Usage
+When using wtw, ensure you guard the command-line arguments with '--'.
+
+Example usage:
+```
+wtw -b 181716aa -c ebdbb2ff -P 10 -x 20 -y 20 -- pstree -U
+```
