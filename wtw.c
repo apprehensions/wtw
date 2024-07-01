@@ -24,7 +24,7 @@
 
 static const char usage[] =
 	"usage: wtw [-b rrggbbaa] [-c rrggbbaa] [-f font] [-p period] [-P padding]\n"
-	"           [-w pos] [-h pos] [-x pos] [-y pos] command [arg ...]\n";
+	"           [-w num] [-h num] [-x pos] [-y pos] command [arg ...]\n";
 
 #include "config.h"
 
@@ -290,9 +290,12 @@ setup(void)
 	zwlr_layer_surface_v1_add_listener(
 		layer_surface, &layer_surface_listener, NULL);
     zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
+	zwlr_layer_surface_v1_set_size(layer_surface, width, height);
 	zwlr_layer_surface_v1_set_anchor(layer_surface,
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT |
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+    zwlr_layer_surface_v1_set_margin(layer_surface,
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP, ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT,
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM, ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
 	wl_surface_commit(surface);
 
 	return 0;
