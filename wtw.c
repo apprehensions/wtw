@@ -286,16 +286,14 @@ setup(void)
 	surface = wl_compositor_create_surface(compositor);
 	layer_surface = zwlr_layer_shell_v1_get_layer_surface(layer_shell, surface,
 		NULL, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "wtw");
-
-	zwlr_layer_surface_v1_add_listener(
-		layer_surface, &layer_surface_listener, NULL);
+	zwlr_layer_surface_v1_add_listener(layer_surface,
+		&layer_surface_listener, NULL);
     zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
 	zwlr_layer_surface_v1_set_size(layer_surface, width, height);
 	zwlr_layer_surface_v1_set_anchor(layer_surface,
-		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
-    zwlr_layer_surface_v1_set_margin(layer_surface,
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP, ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT,
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM, ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+		((width && height) ? 0 :
+		ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM));
 	wl_surface_commit(surface);
 
 	return 0;
