@@ -157,6 +157,7 @@ static void
 render(void)
 {
 	int ty = y + pad;
+	int32_t stride;
 	uint32_t tw = 0, w = 0, h = 0;
 	char *line;
 	PoolBuf *buf;
@@ -173,8 +174,9 @@ render(void)
 
 	w = MIN(w + pad * 2 + x, width);
 	h = MIN(h + pad * 2 + y, height);
+	stride = drwl_stride(w);
 
-	if (!(buf = poolbuf_create(shm, w, h))) {
+	if (!(buf = poolbuf_create(shm, w, h, stride, 0))) {
 		fputs("failed to create draw buffer\n", stderr);
 		return;
 	}
@@ -192,7 +194,6 @@ render(void)
 
 	wl_surface_attach(surface, buf->wl_buf, 0, 0);
 	wl_surface_damage_buffer(surface, 0, 0, w, h);
-	poolbuf_destroy(buf);
 	wl_surface_commit(surface);
 }
 
@@ -279,7 +280,7 @@ setup(void)
 		fputs("failed to create drwl context\n", stderr);
 		return -1;
 	}
-	if (!(drwl_load_font(drw, 1, &font_name, NULL)))
+	if (!(drwl_font_create(drw, 1, &font_name, NULL)))
 		return -1;
 	drwl_setscheme(drw, scheme);
 
