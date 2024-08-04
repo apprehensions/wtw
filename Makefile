@@ -10,7 +10,7 @@ PKGS = wayland-client fcft pixman-1
 INCS = `$(PKG_CONFIG) --cflags $(PKGS)`
 LIBS = `$(PKG_CONFIG) --libs $(PKGS)`
 
-TWCPPFLAGS = -DVERSION=\"$(VERSION)\"
+TWCPPFLAGS = -D_GNU_SOURCE -DVERSION=\"$(VERSION)\"
 TWCFLAGS   = -pedantic -Wall $(INCS) $(TWCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
 LDLIBS     = $(LIBS)
 
